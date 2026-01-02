@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>MRGcodex</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
+
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{
+  background:radial-gradient(circle at top,#071528,#000);
+  color:#00ffcc;
+  font-family:'Share Tech Mono',monospace;
+  overflow:hidden;
+}
+.glass{
+  background:rgba(0,0,0,0.65);
+  backdrop-filter:blur(16px);
+  border:1px solid rgba(0,160,255,0.4);
+  border-radius:18px;
+  padding:16px;
+}
+#container{
+  width:94%;
+  max-width:1200px;
+  margin:60px auto;
+}
+h1{text-align:center;color:#00aaff}
+button{
+  background:transparent;
+  border:1px solid #00aaff;
+  color:#00ffcc;
+  padding:10px 16px;
+  margin:5px;
+  border-radius:12px;
+  cursor:pointer;
+}
+button:hover{background:#00aaff;color:#000}
+#terminal{
+  background:#000;
+  height:340px;
+  padding:10px;
+  overflow:auto;
+  border-radius:12px;
+  margin-top:10px;
+}
+.line{white-space:pre-wrap}
+#map{height:220px;margin-top:10px;border-radius:12px}
+#time{
+  position:fixed;
+  top:10px;
+  right:15px;
+  color:red;
+  font-size:14px;
+}
+.footer{
+  margin-top:10px;
+  font-size:12px;
+  text-align:center;
+  color:#888;
+}
+</style>
+</head>
+
+<body>
+
+<div id="time"></div>
+
+<div id="container" class="glass">
+<h1>MRGcodex</h1>
+
+<div>
+  <button onclick="startScan()">What's My IP</button>
+  <button onclick="checkSSL()">SSL / HTTPS</button>
+  <button onclick="checkDNS()">DNS Security</button>
+  <button onclick="checkHTTPHeaders()">HTTP Headers Audit</button>
+  <button onclick="openTelegram()">Telegram</button>
+  <button onclick="openYouTube()">YouTube</button>
+</div>
+
+<div id="terminal"></div>
+<div id="map"></div>
+
+<div class="footer">
+MRGcodex © 2026 • Cyber Security • Linux • Research<br>
+OSINT only • No data stored
+</div>
+</div>
+
+<audio id="typeSound" preload="auto">
+<source src="https://assets.mixkit.co/sfx/preview/mixkit-typewriter-soft-click-1125.mp3">
+</audio>
+
+<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+
+<script>
+const terminal=document.getElementById("terminal");
+const sound=document.getElementById("typeSound");
+sound.volume=0.3;
+
+let threatScore=0;
+let dnsSPF=false, dnsDMARC=false, headerScore=0;
+
+function print(t){
+  const l=document.createElement("div");
+  l.className="line";
+  terminal.appendChild(l);
+  let i=0;
+  const x=setInterval(()=>{
+    if(i<t.length){
+      l.textContent+=t.charAt(i++);
+      sound.currentTime=0; sound.play();
+    }else clearInterval(x);
+    terminal.scrollTop=terminal.scrollHeight;
+  },15);
+}
+
+function openTelegram(){
+  window.open("https://t.me/+__A_wOH76ngwMjA9","_blank");
+}
+function openYouTube(){
+  window.open("https://youtube.com/@mrgcodex?si=5jKH6UcBlWnxTsTp","_blank");
+}
+
+/* ================= MAIN SCAN ================= */
+
+async function startScan(){
+  terminal.innerHTML="";
+  threatScore=0;
+  dnsSPF=false; dnsDMARC=false; headerScore=0;
+
+  print("[root@mrgcodex]# initializing session...");
+  print("Accepting your request, please wait 5 seconds...");
+
+  setTimeout(async()=>{
+    const ip4=await fetch("https://api.ipify.org?format=json").then(r=>r.json());
+    print("Public IPv4 : "+ip4.ip);
+
+    const data=await fetch("https://ipapi.co/"+ip4.ip+"/json/").then(r=>r.json());
+    print("Country     : "+data.country_name);
+    print("City        : "+data.city);
+    print("ISP         : "+data.org);
+    print("ASN         : "+data.asn);
+    print("Timezone    : "+data.timezone);
+
+    if(data.threat?.is_tor){
+      print("Tor Network : YES");
+      threatScore+=40;
+    }else if(data.threat?.is_vpn||data.threat?.is_proxy){
+      print("Proxy/VPN   : DETECTED");
+      threatScore+=25;
+    }else{
+      print("Tor Network : NO");
+    }
+
+    showMap(data.latitude,data.longitude);
+    updateTime(data.timezone);
+
+    await detectIPv6();
+    showThreatScore();
+  },5000);
+}
+
+/* ================= IPv6 GEO ================= */
+
+async function detectIPv6(){
+  try{
+    const ipv6=await fetch("https://api64.ipify.org?format=json").then(r=>r.json());
+    if(!ipv6.ip.includes(":")) throw "no ipv6";
+
+    print("IPv6 Supported : YES");
+    print("Public IPv6    : "+ipv6.ip);
+
+    const geo6=await fetch("https://ipapi.co/"+ipv6.ip+"/json/").then(r=>r.json());
+    if(geo6.country_name){
+      print("IPv6 Country   : "+geo6.country_name);
+      print("IPv6 City      : "+geo6.city);
+      print("IPv6 ISP       : "+geo6.org);
+      print("IPv6 ASN       : "+geo6.asn);
+    }else{
+      print("IPv6 Geolocation : NOT AVAILABLE");
+    }
+  }catch{
+    print("IPv6 Supported : NO");
+    print("Public IPv6    : NOT AVAILABLE");
+  }
+}
+
+/* ================= MAP & TIME ================= */
+
+function showMap(lat,lon){
+  document.getElementById("map").innerHTML="";
+  const m=L.map("map").setView([lat,lon],10);
+  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png").addTo(m);
+  L.marker([lat,lon]).addTo(m);
+}
+
+function updateTime(tz){
+  setInterval(()=>{
+    document.getElementById("time").textContent=
+      new Date().toLocaleString("en-US",{timeZone:tz});
+  },1000);
+}
+
+/* ================= SSL ================= */
+
+function checkSSL(){
+  print("[+] SSL / HTTPS check...");
+  if(location.protocol!=="https:"){
+    threatScore+=15;
+    print("HTTPS Enabled : NO");
+  }else{
+    print("HTTPS Enabled : YES");
+  }
+}
+
+/* ================= DNS ================= */
+
+async function dnsQuery(n,t){
+  return fetch(`https://dns.google/resolve?name=${n}&type=${t}`).then(r=>r.json());
+}
+
+async function checkDNS(){
+  print("[+] DNS security audit...");
+  const d=location.hostname;
+  const TXT=await dnsQuery(d,"TXT");
+
+  TXT.Answer?.forEach(r=>{
+    if(r.data.includes("v=spf1")) dnsSPF=true;
+    if(r.data.includes("v=DMARC1")) dnsDMARC=true;
+  });
+
+  if(!dnsSPF){ threatScore+=10; print("SPF Record   : MISSING"); }
+  else print("SPF Record   : PRESENT");
+
+  if(!dnsDMARC){ threatScore+=10; print("DMARC Record : MISSING"); }
+  else print("DMARC Record : PRESENT");
+}
+
+/* ================= HTTP HEADERS ================= */
+
+async function checkHTTPHeaders(){
+  print("[+] HTTP security headers audit...");
+
+  try{
+    const r=await fetch(location.origin,{method:"HEAD"});
+    const headers=[
+      "strict-transport-security",
+      "content-security-policy",
+      "x-frame-options",
+      "x-content-type-options",
+      "referrer-policy",
+      "permissions-policy",
+      "cross-origin-opener-policy",
+      "cross-origin-embedder-policy",
+      "cross-origin-resource-policy"
+    ];
+
+    headers.forEach(h=>{
+      const v=r.headers.get(h);
+      if(v) headerScore++;
+      print(h+" : "+(v?"PRESENT":"MISSING"));
+    });
+
+    if(headerScore<4) threatScore+=10;
+  }catch{
+    print("Header audit limited by browser security");
+  }
+}
+
+/* ================= THREAT SCORE ================= */
+
+function showThreatScore(){
+  setTimeout(()=>{
+    print("------------------------------");
+    print("Threat Score : "+threatScore+" / 100");
+
+    let level="LOW";
+    if(threatScore>=60) level="HIGH";
+    else if(threatScore>=30) level="MEDIUM";
+
+    print("Risk Level   : "+level);
+  },1200);
+}
+</script>
+
+</body>
+</html>
